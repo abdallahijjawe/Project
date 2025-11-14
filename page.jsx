@@ -1,271 +1,198 @@
 "use client";
 
-import styles from "./page.module.css";
-import LineChart from "../components/LineChart";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import styles from "./page.module.css"; 
+import zxcvbn from "zxcvbn";
 
+function validatePassword(pw) {
+  const errors = [];
+// Owasp
+  if (!pw || pw.length < 12) errors.push("Password must be at least 8 characters.");
+  if (!/[a-z]/.test(pw)) errors.push("Must contain a lowercase letter.");
+  if (!/[A-Z]/.test(pw)) errors.push("Must contain an uppercase letter.");
+  if (!/[0-9]/.test(pw)) errors.push("Must contain a digit.");
+  if (!/[!@#$%^&*(),.?\":{}|<>]/.test(pw)) errors.push("Must contain a special character.");
+  return errors;
+}
 
-export default function Home(){
+export default function Profile() {
+    const [currentPass, setCurrentPass] = useState("");
+    const [newPass, setNewPass] = useState("");
+    const [confirmPass, setConfirmPass] = useState("");
+    const [msg, setMsg] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [pwScore, setPwScore] = useState(null);
     const router = useRouter();
-    const [search,setSearch] = useState("");
-    const [data,setData] = useState([])
-    const [showConfirm, setShowConfirm] = useState(false);
     const [open,setOpen] = useState(false)
 
     useEffect(() => {
-        const token = localStorage.getItem("token");
-        if (!token) {
-            router.push("/");
-        }
+      const token = localStorage.getItem("token");
+      if (!token) {
+        router.push("/");
+      }
     }, [router]);
 
-    const fetchData = async () =>{
-            const res = await fetch("http://127.0.0.1:5000/dashboard/logs")
-            const d = await res.json()
-            let allE = [];        
-            d.forEach((file) => {
-                if (file.events && file.events.length > 0) {
-                    file.events.forEach((row) => {
-                        allE.push({
-                            filename: file.filename,
-                            source: file.source,
-                            time: row.time ? new Date(row.time.$date).toLocaleString():"-",
-                            event: row.event,
-                            username: row.username,
-                            ip: row.ip || "-",
-                            anomaly: row.anomaly === -1 ? true : false
-                        });
-                    });
-                }
-            });
-            setData(allE);
-            };
+    useEffect(() => {
+      if (newPass) {
+        const result = zxcvbn(newPass);
+        setPwScore(result.score);
+      } else {
+        setPwScore(null);
+      }
+    }, [newPass]);
 
-    useEffect( () => {
-        fetchData();
-
-    },[])
+  
 
 
 
-    const matchCondition = (row, key, value, negate = false) => {
-        let result = false;
-
-        switch (key) {
-            case "anomaly":
-              const boolVal = value === "true";
-              result = row.anomaly === boolVal;
-              break;
-            case "username":
-               if (value.endsWith("*")) {
-                  const base = value.slice(0, -1).toLowerCase();
-                  result = row.username?.toLowerCase().includes(base);
-              } else {
-              result = row.username?.toLowerCase().trim() === value.trim();
-              }
-              break;
-            case "ip":
-              if (value.endsWith("*")) {
-                  const base = value.slice(0, -1).toLowerCase();
-                  result = row.ip?.toLowerCase().includes(base);
-              } else {
-                  result = row.ip?.toLowerCase().trim() === value.trim();
-              }
-                break;
-            case "source":
-                result = row.source?.toLowerCase().includes(value);
-                break;
-            case "filename":
-                result = row.filename?.toLowerCase().includes(value);
-                break;
-            case "event":
-                result = row.event?.toLowerCase().includes(value);
-                break;
-            case "time":
-                result = row.time.toString().toLowerCase().includes(value.trim());
-                break;
-            default:
-              result =
-                row.filename?.toLowerCase().includes(value) ||
-                row.source?.toLowerCase().includes(value) ||
-                row.event?.toLowerCase().includes(value) ||
-                row.username?.toLowerCase().includes(value) ||
-                row.ip?.toLowerCase() === value;
-                row.time.toString().toLowerCase().includes(value.trim())
-        }
-
-    return negate ? !result : result;
-};
-
-    const evaluateQuery = (row, query) => {
-        const orParts = query.split(/\s+OR\s+/i);
-
-        return orParts.some((orPart) => {
-          const andParts = orPart.split(/\s+AND\s+/i);
-        
-          return andParts.every((andTerm) => {
-            let term = andTerm.trim();
-            let negate = false;
-
-            if (/^NOT\s+/i.test(term)) {
-              negate = true;
-              term = term.replace(/^NOT\s+/i, "");
-            }
-        
-            let [key, value] = term.includes(":") ? term.split(":") : [null, term];
-            if (value) value = value.toLowerCase();
-        
-            return matchCondition(row, key, value, negate);
-          });
-        });
-    };
-
-    const filteredData = data.filter((row) => {
-        if (!search.trim()) return true; 
-        return evaluateQuery(row, search);
-    });
-
-    const downReport = async () => {
-        const res = await fetch("http://127.0.0.1:5000/dashboard/report",{
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(filteredData)
-        })
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "Security_Report.pdf";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+// ---------------------------- Submit ----------------------------
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    const clientErrors = validatePassword(newPass);
+    if (clientErrors.length) {
+        setMsg(clientErrors.join(" | "));
+        return;
     }
 
-    const clearBtn = async () => {
-        await fetch("http://127.0.0.1:5000/dashboard/clear", { method: "POST" });
-        setData([]);
-        setShowConfirm(false)
+
+    if (newPass !== confirmPass) {
+        setMsg("Passwords do not match");
+        return;
     }
 
-    const handleLogout = () => {
-        localStorage.removeItem("token");
-        document.cookie = "token=; path=/; max-age=0";
-        router.push("/");
-    };
+    const token = localStorage.getItem("token");
+    if (!token) {
+        setMsg("You must be logged in to change your password");
+        return;
+    }
 
-    return(
-        <main className={styles.main}>
-            
-            <title>Dashboard</title>
+    setLoading(true);
+    setMsg("");
 
-            <nav className={styles.nav}>
-                <p>Dashboard</p>
+    try {
+      const res = await fetch("http://127.0.0.1:5000/auth/change-password", {
+        method: "POST",
+        headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}` 
+        },
+        body: JSON.stringify({
+          old_password: currentPass,
+          newPassword: newPass,
+        }),
+      });
+
+      const data = await res.json();
+      
+      if (res.ok) {
+        setMsg("Password changed successfully");
+        setCurrentPass("");
+        setNewPass("");
+        setConfirmPass("");
+      } else {
+        setMsg(data.message || "Error changing password");
+      }
+    } catch (err) {
+      console.error(err);
+      setMsg("Network error - Please check your connection");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+//   check password color 
+    const getPwColor = (score) => {
+    switch(score) {
+      case 0: return "red";
+      case 1: return "orange";
+      case 2: return "yellow";
+      case 3: return "lightgreen";
+      case 4: return "green";
+      default: return "transparent";
+    }
+  };
+
+  const getPwText = (score) => {
+    switch(score) {
+      case 0: return "Very Weak";
+      case 1: return "Weak";
+      case 2: return "Fair";
+      case 3: return "Strong";
+      case 4: return "Very Strong";
+      default: return "";
+    }
+  };
+
+  return (
+    <main className={styles.main}>
+
+      <title>Profile</title>
+
+      <nav className={styles.nav}>
+                <p>Profile</p>
                 <div>
-                    <Link href="../upload">Upload Logs</Link>|{" "} 
-                    <div className={styles.setting}>
-                        <p onClick={() => setOpen(!open)}>Settings</p>
-                        {
-                            open && (
-                                <div className={styles.dropDown}>
-                                    <Link href="../profile">Profile</Link>
-                                    <p onClick={handleLogout}>Logout</p>
-                                </div>
-                            )
-                        }
-                    </div>
-                   
+                  <Link href="../dashboard">dashboard</Link>|{" "}
+                  <Link href="../upload">Upload Logs</Link>  
                 </div>
+      </nav>
 
-            </nav>
+      <div className={styles.headers}>
+        <h1>User Profile</h1>
+        <p>Change your password below:</p>
+      </div>
 
-            <div className={styles.search}>
+      <form onSubmit={handleSubmit} className={styles.formBox}>
+        <label>Current Password</label>
+        <input
+          type="password"
+          value={currentPass}
+          onChange={(e) => setCurrentPass(e.target.value)}
+          required
+        />
 
-                <h1>New search</h1>
-                <input type="text" placeholder="Enter to search" id="search"
-                    onChange={(e) => setSearch(e.target.value)}
-                />
-                <p> ✔️ {filteredData.length} event shown </p>
+        <label>New Password</label>
+        <input
+          type="password"
+          value={newPass}
+          onChange={(e) => setNewPass(e.target.value)}
+          required
+          minLength={6}
+        />
+        {pwScore !== null && (
+          <div style={{ margin: "5px 0" }}>
+            <div style={{
+              width: `${(pwScore + 1) * 20}%`,
+              height: "8px",
+              backgroundColor: getPwColor(pwScore),
+              transition: "width 0.3s"
+            }}></div>
+            <span style={{ fontSize: "0.9em" }}>{getPwText(pwScore)}</span>
+          </div>
+        )}
+        <label>Confirm New Password</label>
+        <input
+          type="password"
+          value={confirmPass}
+          onChange={(e) => setConfirmPass(e.target.value)}
+          required
+        />
 
-                <button
-                    className={styles.downReport}
-                    onClick={downReport}
-                > 🗄️ Download Report as PDF</button>
-
-                <button
-                    className={styles.clearBtn}
-                    onClick={() => setShowConfirm(true)}
-                > 🧹 Clear Dashboard</button>
-
-                {showConfirm && (
-                <div className={styles.confirmBox}>
-                  <p> ⚠️ Are you sure you want to clear all dashboard data?</p>
-                  <div className={styles.confirmActions}>
-                    <button
-                      className={styles.yesBtn}
-                      onClick={clearBtn}
-                    >
-                      Yes, clear it
-                    </button>
-                    <button
-                      className={styles.noBtn}
-                      onClick={() => setShowConfirm(false)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-                )}
-
-            </div>
-
-            <div className={styles.chart}>
-                
-                <LineChart data={filteredData} />
-            </div>
-
-            <div className={styles.details}>
-                
-            
-                <div className={styles.event}>
-                    <table>
-                        
-                        <thead>
-                            <tr>
-                            <th>Filename</th>
-                            <th>Source</th>
-                            <th>Time</th>
-                            <th>Event</th>
-                            <th>Username</th>
-                            <th>IP</th>
-                            </tr>
-                        </thead>
-
-                        <tbody>
-                            {
-                                filteredData.length > 0 ?
-                                filteredData.map((row,index) => (
-                                    <tr key={index} style={{color:row.anomaly ? "red" : "black"}}>
-                                        <td>{row.filename}</td>
-                                        <td>{row.source}</td>
-                                        <td>{row.time }</td>
-                                        <td>{row.event}</td>
-                                        <td>{row.username}</td>
-                                        <td>{row.ip}</td>
-                                    </tr>
-                                )):(
-                                    <tr>
-                                        <td colSpan="6">No results found</td>
-                                    </tr>
-                                )
-                            }
-                        </tbody>
-
-                    </table>
-                </div>
-
-            </div>
-        </main>
-    );
+        <button type="submit" disabled={loading}>
+          {loading ? "Saving..." : "Save Changes"}
+        </button>
+        
+        {msg && (
+          <p style={{ 
+            color: msg.includes("successfully") ? "green" : "red",
+            marginTop: "10px" 
+          }}>
+            {msg}
+          </p>
+        )}
+      </form>
+    </main>
+  );
 }
